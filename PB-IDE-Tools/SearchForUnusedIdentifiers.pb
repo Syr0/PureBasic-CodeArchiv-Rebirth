@@ -117,7 +117,7 @@ stringLength = Len(code$)
 ; ==========================================================================================================================
 ;- Parse the PB code
 ; ==========================================================================================================================
-*lexer = PBLexer::Create(code$)
+*lexer = PBLexer::Create(@code$)
 If *lexer = 0
   MessageRequester(#Program_Name$, "Lexer could not be created!", #PB_MessageRequester_Error)
   End
