@@ -1,0 +1,992 @@
+
+;|��������������������������������������������������������������������������������������������������
+;| Title            : TabBarGadget
+;| Version          : 1.1.0 (2011-12-12)
+;| Copyright        : UnionBytes
+;|                    (Martin Guttmann alias STARG�TE)
+;| PureBasic        : 4.60 +
+;| String-Format    : Ascii, Unicode
+;| Operating-System : All
+;| Processor        : x86, x64
+;| Description      : Gadget for displaying and using tabs like in the browser
+;|__________________________________________________________________________________________________
+;|
+;| Titel            : Registerkartenleisten-Gadget
+;| Beschreibung     : Gadget zum Darstellen und Benutzen von Registerkarten �hnlich wie im Browser
+;|__________________________________________________________________________________________________
+
+
+
+EnableExplicit
+
+
+
+; Flags f�r das TabBarGadget
+; Flags for the TabBarGadget
+Enumeration
+	#TabBarGadget_CloseButton    = %0000001 ; f�gt jedem Tab ein Schlie�en-Button [X] hinzu
+	#TabBarGadget_EmptyButton    = %0000010 ; f�gt einen leeren Tab hinzu
+	#TabBarGadget_TextCutting    = %0000100 ; schneidet den Tab-Text ab, wenn zu wenig Platz in der Leiste ist
+	#TabBarGadget_Vertical       = %0010000 ; Die Reisterkartenleiste ist vertikal
+	; #TabBarGadget_InvertTabAlign = %1000000 ; 
+EndEnumeration
+
+; Ereignisse f�r das TabBarGadget
+; Events for the TabBarGadget
+Enumeration
+	#TabBarGadget_Event_NewTab   = 1 ; ein neuer Tab wird angefordert
+	#TabBarGadget_Event_CloseTab = 2 ; ein Tab soll geschlossen werden
+	#TabBarGadget_Event_Change   = 3 ; Der aktive Tab wurde ge�ndert
+	#TabBarGadget_Event_Swap     = 4 ; Der aktive Tab wurde verschoben
+EndEnumeration
+
+Enumeration
+	#TabBarGadgetMode_Position
+	#TabBarGadgetMode_Data
+EndEnumeration
+
+
+Enumeration
+	#TabBarGadgetItem_None        = -1
+	#TabBarGadgetItem_EmptyButton = -2
+EndEnumeration
+
+Enumeration
+	#TabBarGadget_Navigation     = %001000
+	#TabBarGadget_Location       = %110000
+EndEnumeration
+
+
+Structure TabBarGadgetTempItem
+	*Item.TabBarGadgetItem
+	Width.i
+	Len.i
+EndStructure
+
+Structure TabBarGadgetItem
+	Text.s
+	ShortText.s
+	ImageID.i
+	DataValue.i
+	Width.i
+	X.i
+EndStructure
+
+Structure TabBarGadget
+	Number.i
+	Flags.i
+	List Item.TabBarGadgetItem()
+	EmptyItem.TabBarGadgetItem
+	*CurrentItem.TabBarGadgetItem
+	*MoveItem.TabBarGadgetItem
+	*ReadyToMoveItem.TabBarGadgetItem
+	SaveMouseX.i
+	MouseX.i
+	MouseY.i
+	Event.i
+	EventTab.i
+	Shift.i
+	CheckTab.i
+	MaxWidth.i
+	Width.i
+	ToolTipText.s
+	ToolTipTab.i
+EndStructure
+
+Structure TabBarGadgetInclude
+	FaceColor.i
+	LightColor.i
+	ShadowColor.i
+	TextColor.i
+	FontID.i
+	Padding.i
+	Margin.i
+	ImageSpace.i
+	CrossSize.i
+	ArrowSize.i
+	Radius.i
+	Transparency.a
+EndStructure
+
+Global TabBarGadgetInclude.TabBarGadgetInclude
+
+With TabBarGadgetInclude
+	CompilerSelect #PB_Compiler_OS
+		CompilerCase #PB_OS_Windows
+			\ShadowColor = GetSysColor_(#COLOR_3DSHADOW)|$FF<<24
+			\FaceColor   = GetSysColor_(#COLOR_3DFACE)|$FF<<24
+			\LightColor  = GetSysColor_(#COLOR_3DHIGHLIGHT)|$FF<<24
+			\TextColor   = GetSysColor_(#COLOR_BTNTEXT)|$FF<<24
+		CompilerDefault
+			\ShadowColor = $FF808080
+			\FaceColor   = $FFD0D0D0
+			\LightColor  = $FFFFFFFF
+			\TextColor   = $FF000000
+	CompilerEndSelect
+	\FontID       = GetGadgetFont(#PB_Default)
+	\Padding      = 6 ; Space from tab border to text
+	\Margin       = 4 ; Space from tab to border
+	\ImageSpace   = 3 ; Space from image zu text
+	\CrossSize    = 8 ; Size of the close cross
+	\ArrowSize    = 6 ; Size of the Arrow in navigation
+	\Radius       = 7 ; Radius of the edge of the tab
+	\Transparency = $C0
+EndWith
+
+
+
+
+
+;{ ! Private procedures for internal calculations ! Not for use ! }
+
+Procedure TabBarGadget_MouseIn(*TabBarGadget.TabBarGadget, X.i, Y.i, Width.i, Height.i)
+	
+	With *TabBarGadget
+		
+		If Width  < 0 : X + Width  : Width  * -1 : EndIf
+		If Height < 0 : Y + Height : Height * -1 : EndIf
+		If \MouseX >= X And \MouseX <= X+Width And \MouseY >= Y And \MouseY <= Y+Height
+			ProcedureReturn #True
+		EndIf
+		
+	EndWith
+	
+EndProcedure
+
+Procedure TabBarGadget_DrawCross(X.i, Y.i, Size.i, Color.i, Border.i=#False)
+	
+	Protected Alpha.i = Alpha(Color)/4
+	
+	Line(X, Y+1, Size-1, Size-1, Color&$FFFFFF|Alpha<<24)
+	Line(X+1, Y, Size-1, Size-1, Color&$FFFFFF|Alpha<<24)
+	Line(X, Y+Size-2, Size-1, -Size+1, Color&$FFFFFF|Alpha<<24)
+	Line(X+1, Y+Size-1, Size-1, -Size+1, Color&$FFFFFF|Alpha<<24)
+	Line(X, Y, Size, Size, Color)
+	Line(X, Y+Size-1, Size, -Size, Color)
+	
+	If Border
+		Alpha * 2
+		DrawingMode(#PB_2DDrawing_Outlined|#PB_2DDrawing_AlphaBlend)
+		Box(X-2, Y-2, Size+4, Size+4, Color&$FFFFFF|Alpha<<24)
+		DrawingMode(#PB_2DDrawing_Transparent|#PB_2DDrawing_AlphaBlend)
+	EndIf
+	
+EndProcedure
+
+Procedure TabBarGadget_DrawArrow(X.i, Y.i, Size.i, Color.i, Border.i=#False)
+	
+	Protected Index.i, Alpha.i = Alpha(Color)/2
+	
+	If Size > 0
+		For Index = 0 To Size
+			Line(X+Index, Y-Index, 1, Index*2+1, Color)
+		Next
+	ElseIf Size < 0
+		For Index = 0 To -Size
+			Line(X-Index, Y-Index, 1, Index*2+1, Color)
+		Next
+	EndIf
+	
+EndProcedure
+
+Procedure.i TabBarGadget_DrawItem(*TabBarGadget.TabBarGadget, *Item.TabBarGadgetItem, DrawMode.i=1)
+	
+	Protected X.i, Y.i, Color.i, ShiftY.i, Width.i, Difference.i, Factor.f
+	
+	With TabBarGadgetInclude
+		
+		; Animation der bewegten Registerkarte
+		If *TabBarGadget\MoveItem = *Item
+			Difference = Abs(*Item\X-(*TabBarGadget\MouseX-*Item\Width/2))
+			If Difference > 24
+				*Item\X = *TabBarGadget\MouseX - *Item\Width/2
+			Else
+				Factor = Pow(Difference/24, 2)
+				*Item\X = *Item\X*(1-Factor) + (*TabBarGadget\MouseX-*Item\Width/2)*Factor
+			EndIf
+			If *Item\X < TabBarGadgetInclude\Margin
+				*Item\X = TabBarGadgetInclude\Margin
+			EndIf
+			If *Item\X + *Item\Width + 1 > *TabBarGadget\Width + TabBarGadgetInclude\Margin
+				*Item\X = *TabBarGadget\Width + TabBarGadgetInclude\Margin - *Item\Width + 1
+			EndIf
+		EndIf
+		
+		DrawingFont(\FontID)
+		DrawingMode(#PB_2DDrawing_Transparent|#PB_2DDrawing_AlphaBlend|#PB_2DDrawing_Gradient)
+		If EventType() = #PB_EventType_MouseLeave 
+			Color = \TextColor&$FFFFFF | \Transparency<<24
+			LinearGradient(0, 0, 0, OutputHeight()*0.75-1)
+		ElseIf TabBarGadget_MouseIn(*TabBarGadget, *Item\X, \Margin, *Item\Width, OutputHeight()) And *TabBarGadget\MoveItem = #Null
+			Select DrawMode
+				Case 1, 2
+					ChangeCurrentElement(*TabBarGadget\Item(), *Item)
+					*TabBarGadget\EventTab = ListIndex(*TabBarGadget\Item())
+					*TabBarGadget\ToolTipText = *Item\Text
+				Case 0
+					*TabBarGadget\EventTab = #TabBarGadgetItem_EmptyButton
+			EndSelect
+			If EventType() = #PB_EventType_LeftButtonDown 
+				If DrawMode
+					If *TabBarGadget\CurrentItem <> *Item
+						*TabBarGadget\Event = #TabBarGadget_Event_Change
+					EndIf
+					*TabBarGadget\CurrentItem = *Item
+					*TabBarGadget\ReadyToMoveItem = *TabBarGadget\CurrentItem
+					*TabBarGadget\SaveMouseX = *TabBarGadget\MouseX
+				Else
+					*TabBarGadget\Event = #TabBarGadget_Event_NewTab
+				EndIf
+			ElseIf EventType() = #PB_EventType_MiddleButtonDown And DrawMode
+				*TabBarGadget\Event = #TabBarGadget_Event_CloseTab
+				*TabBarGadget\CurrentItem = *Item
+				*TabBarGadget\MoveItem = #Null
+				*TabBarGadget\ReadyToMoveItem = #Null
+			ElseIf EventType() = #PB_EventType_MouseMove And *TabBarGadget\ReadyToMoveItem
+				If Abs(*TabBarGadget\SaveMouseX-*TabBarGadget\MouseX) > 4
+					*TabBarGadget\MoveItem = *TabBarGadget\ReadyToMoveItem
+				EndIf
+			EndIf
+			Color = \TextColor
+			LinearGradient(0, OutputHeight()/3, 0, OutputHeight()-1)
+		Else
+			Color = \TextColor&$FFFFFF | \Transparency<<24
+			LinearGradient(0, 0, 0, OutputHeight()*0.75-1)
+		EndIf
+		If DrawMode = 2
+			LinearGradient(0, OutputHeight()/3, 0, OutputHeight()-1)
+			Color = \TextColor
+		EndIf
+		GradientColor(0.0, \LightColor)
+		GradientColor(1.0, \FaceColor)
+		
+		Select DrawMode
+			Case 0, 1
+				X = *Item\X : Y = \Margin
+				Width = *Item\Width
+				ShiftY = \Margin
+			Case 2
+				X = *Item\X-\Margin/2 : Y = 0
+				Width = *Item\Width + \Margin
+				ShiftY = \Margin/2
+		EndSelect
+		RoundBox(X, Y, Width, OutputHeight()+\Radius, \Radius, \Radius)
+		DrawingMode(#PB_2DDrawing_Transparent|#PB_2DDrawing_AlphaBlend|#PB_2DDrawing_Outlined)
+		RoundBox(X, Y, Width, OutputHeight()+\Radius, \Radius, \Radius, \ShadowColor)
+		DrawingMode(#PB_2DDrawing_Transparent|#PB_2DDrawing_AlphaBlend)
+		If *Item\ImageID
+			DrawAlphaImage(*Item\ImageID, *Item\X+\Padding, ShiftY+(OutputHeight()-16)/2, Alpha(Color))
+			X = *Item\X + \Padding + 16 + \ImageSpace
+		Else
+			X = *Item\X + \Padding
+		EndIf
+		Y = (OutputHeight()-TextHeight(*Item\ShortText))/2 - \Margin/2 + ShiftY + 1
+		DrawText(X, Y, *Item\ShortText, Color)
+		
+		; Schlie�en-Schaltfl�che
+		If *TabBarGadget\Flags & #TabBarGadget_CloseButton And DrawMode
+			Y = ShiftY + (OutputHeight()-\CrossSize)/2
+			X = *Item\X + *Item\Width - \CrossSize - \Padding
+			If TabBarGadget_MouseIn(*TabBarGadget, X, Y, \CrossSize, \CrossSize) And (*TabBarGadget\MoveItem=0 Or *TabBarGadget\MoveItem=*Item)
+				TabBarGadget_DrawCross(X, Y, \CrossSize, \TextColor, #True)
+				If EventType() = #PB_EventType_LeftButtonDown 
+					*TabBarGadget\Event = #TabBarGadget_Event_CloseTab
+					*TabBarGadget\MoveItem = #Null
+					*TabBarGadget\ReadyToMoveItem = #Null
+				EndIf
+			Else
+				TabBarGadget_DrawCross(X, Y, \CrossSize, \TextColor&$FFFFFF|\Transparency<<24)
+			EndIf
+		EndIf
+		
+	EndWith
+	
+EndProcedure
+
+Procedure TabBarGadget_ItemWidth(*TabBarGadget.TabBarGadget, *Item.TabBarGadgetItem, EmptyItem=#False)
+	
+	Protected Width.i
+	
+	Width = TextWidth(*Item\ShortText) + 2*TabBarGadgetInclude\Padding
+	If *TabBarGadget\Flags & #TabBarGadget_CloseButton And EmptyItem = #False
+		Width + TabBarGadgetInclude\CrossSize + TabBarGadgetInclude\Padding
+	EndIf
+	If *Item\ImageID Or EmptyItem
+		Width + 16
+		If *Item\ShortText
+			Width + TabBarGadgetInclude\ImageSpace
+		EndIf
+	EndIf
+	
+	ProcedureReturn Width
+	
+EndProcedure
+
+Procedure.i TabBarGadget_TextCutting(*TabBarGadget.TabBarGadget)
+	
+	Protected NewList Item.TabBarGadgetTempItem()
+	Protected MaxWidth.i, Width.i, Cutting = #True
+	
+	With *TabBarGadget
+		
+		ForEach \Item()
+			\Item()\ShortText = \Item()\Text
+			AddElement(Item())
+			Item()\Item = @\Item()
+			\Item()\Width = TabBarGadget_ItemWidth(*TabBarGadget, @\Item())
+			Item()\Width = \Item()\Width
+			Item()\Len = Len(\Item()\Text)
+			MaxWidth + Item()\Width - 1
+		Next
+		SortStructuredList(Item(), #PB_Sort_Descending, OffsetOf(TabBarGadgetTempItem\Width), #PB_Integer)
+		
+		While MaxWidth > \MaxWidth And Cutting
+			Width = 0
+			Cutting = #False
+			ForEach Item()
+				If Width > Item()\Item\Width Or MaxWidth <= \MaxWidth
+					Break
+				EndIf
+				If Item()\Len
+					Item()\Len - 1
+					Item()\Item\ShortText = Left(Item()\Item\Text, Item()\Len)+".."
+					Width = TabBarGadget_ItemWidth(*TabBarGadget, Item()\Item)
+					MaxWidth - (Item()\Item\Width-Width)
+					Item()\Item\Width = Width
+					Cutting = #True
+				EndIf
+			Next
+		Wend
+		
+	EndWith
+	
+	ProcedureReturn MaxWidth
+	
+EndProcedure
+
+Procedure TabBarGadget_ItemID(*TabBarGadget.TabBarGadget, Position)
+	
+	If Position >= 0 And Position < ListSize(*TabBarGadget\Item())
+		If SelectElement(*TabBarGadget\Item(), Position)
+			ProcedureReturn @*TabBarGadget\Item()
+		EndIf
+	EndIf
+	
+EndProcedure
+
+Procedure TabBarGadget_MaxLength(*TabBarGadget.TabBarGadget)
+	
+	Protected Length.i
+	
+	If *TabBarGadget\Flags & #TabBarGadget_Vertical
+		Length = OutputHeight() - TabBarGadgetInclude\Margin*2
+	Else
+		Length = OutputWidth()  - TabBarGadgetInclude\Margin*2
+	EndIf
+	If *TabBarGadget\Flags & #TabBarGadget_EmptyButton
+		Length - *TabBarGadget\EmptyItem\Width
+	EndIf
+	If *TabBarGadget\Flags & #TabBarGadget_Navigation
+		Length - (TabBarGadgetInclude\ArrowSize+TabBarGadgetInclude\Margin)*2
+	EndIf
+	
+	ProcedureReturn Length
+	
+EndProcedure
+
+Procedure TabBarGadget_Update(Gadget.i)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	Protected X.i, Y.i, MinWidth.i, ShowWith.i, Show.i
+	
+	With *TabBarGadget
+		
+		\ToolTipText = ""
+		\MouseX = GetGadgetAttribute(Gadget, #PB_Canvas_MouseX)
+		\MouseY = GetGadgetAttribute(Gadget, #PB_Canvas_MouseY)
+		\EventTab = #TabBarGadgetItem_None
+		
+		If StartDrawing(CanvasOutput(Gadget))
+			
+			DrawingFont(TabBarGadgetInclude\FontID)
+			
+			If \Flags & #TabBarGadget_EmptyButton
+				\EmptyItem\Width = TabBarGadget_ItemWidth(*TabBarGadget, @\EmptyItem, #True)
+			EndIf
+			
+			\MaxWidth = TabBarGadget_MaxLength(*TabBarGadget)
+			
+			If \Flags & #TabBarGadget_TextCutting
+				\Width = TabBarGadget_TextCutting(*TabBarGadget)
+				ShowWith = \Width
+			Else
+			
+			
+			; Breiten ermitteln
+			If \CheckTab And \CurrentItem
+				ChangeCurrentElement(\Item(), \CurrentItem)
+				If ListIndex(\Item()) < \Shift
+					\Shift = ListIndex(\Item())
+					\CheckTab = #False
+				EndIf
+			EndIf
+			Repeat
+				\Width = 0
+				ShowWith = 0
+				ForEach \Item()
+					\Item()\Width = TabBarGadget_ItemWidth(*TabBarGadget, @\Item())
+					\Width + \Item()\Width-1
+					If ListIndex(\Item()) >= \Shift
+						ShowWith + \Item()\Width-1
+					EndIf
+					If \Item() = \CurrentItem And ShowWith < \MaxWidth
+						\CheckTab = #False
+					EndIf
+				Next
+				If \CheckTab
+					\Shift + 1
+				EndIf
+			Until \CheckTab = #False
+			
+			Repeat
+				If \Shift And SelectElement(\Item(), \Shift-1)
+					If ShowWith + \Item()\Width < \MaxWidth
+						\Shift - 1
+						ShowWith + \Item()\Width-1
+					Else
+						Break
+					EndIf
+				Else
+					Break
+				EndIf
+			ForEver
+			EndIf
+			
+			; Navigation n�tig ?
+			If \Flags & #TabBarGadget_TextCutting
+			Else
+				If \Width >= \MaxWidth
+					\Flags | #TabBarGadget_Navigation
+				Else
+					\Flags & ~#TabBarGadget_Navigation
+				EndIf
+			EndIf
+			
+			DrawingMode(#PB_2DDrawing_AlphaBlend)
+			
+			Box(0, 0, OutputWidth(), OutputHeight(), TabBarGadgetInclude\FaceColor)
+			
+			; Navigation
+			If \Flags & #TabBarGadget_Navigation
+				If EventType() = #PB_EventType_MouseWheel
+					If GetGadgetAttribute(\Number, #PB_Canvas_WheelDelta) < 0 And \Shift > 0
+						\Shift - 1
+					ElseIf GetGadgetAttribute(\Number, #PB_Canvas_WheelDelta) > 0 And ShowWith >= \MaxWidth
+						\Shift + 1
+					EndIf
+				EndIf
+				Y = OutputHeight()/2+TabBarGadgetInclude\Margin
+				If \Shift < 1
+					TabBarGadget_DrawArrow(TabBarGadgetInclude\Margin, Y, TabBarGadgetInclude\ArrowSize, $20000000)
+				ElseIf TabBarGadget_MouseIn(*TabBarGadget, TabBarGadgetInclude\Margin, Y-TabBarGadgetInclude\ArrowSize, TabBarGadgetInclude\ArrowSize, TabBarGadgetInclude\ArrowSize*2+1)
+					TabBarGadget_DrawArrow(TabBarGadgetInclude\Margin, Y, TabBarGadgetInclude\ArrowSize, $FF000000, #True)
+					If EventType() = #PB_EventType_LeftButtonDown Or \MoveItem
+						\Shift - 1
+					EndIf
+				Else
+					TabBarGadget_DrawArrow(TabBarGadgetInclude\Margin, Y, TabBarGadgetInclude\ArrowSize, $80000000)
+				EndIf
+				If ShowWith < \MaxWidth
+					TabBarGadget_DrawArrow(OutputWidth()-TabBarGadgetInclude\Margin, Y, -TabBarGadgetInclude\ArrowSize, $20000000)
+				ElseIf TabBarGadget_MouseIn(*TabBarGadget, OutputWidth()-TabBarGadgetInclude\Margin, Y-TabBarGadgetInclude\ArrowSize, -TabBarGadgetInclude\ArrowSize, TabBarGadgetInclude\ArrowSize*2+1)
+					TabBarGadget_DrawArrow(OutputWidth()-TabBarGadgetInclude\Margin, Y, -TabBarGadgetInclude\ArrowSize, $FF000000, #True)
+					If EventType() = #PB_EventType_LeftButtonDown Or \MoveItem
+						\Shift + 1
+					EndIf
+				Else
+					TabBarGadget_DrawArrow(OutputWidth()-TabBarGadgetInclude\Margin, Y, -TabBarGadgetInclude\ArrowSize, $80000000)
+				EndIf
+				X = TabBarGadgetInclude\Margin*2 + TabBarGadgetInclude\ArrowSize
+			Else
+				X = TabBarGadgetInclude\Margin
+			EndIf
+			
+			If TabBarGadget_MouseIn(*TabBarGadget, X+ShowWith, 0, OutputWidth()-X-ShowWith-X, OutputHeight())
+				If EventType() = #PB_EventType_LeftDoubleClick
+					*TabBarGadget\Event = #TabBarGadget_Event_NewTab
+				EndIf
+			EndIf
+			
+			\Width = 0
+			If SelectElement(\Item(), \Shift)
+				Repeat
+					\Item()\X = X + \Width
+					If \Width + \Item()\Width - 1 > \MaxWidth
+						Break
+					EndIf
+					If \CurrentItem = \Item()
+						Show = #True
+					Else
+						TabBarGadget_DrawItem(*TabBarGadget, \Item())
+					EndIf
+					\Width + \Item()\Width - 1
+				Until Not NextElement(\Item())
+			EndIf
+			\EmptyItem\X = X + \Width
+			If \Flags & #TabBarGadget_EmptyButton
+				TabBarGadget_DrawItem(*TabBarGadget, \EmptyItem, 0)
+			EndIf
+			If Show
+				TabBarGadget_DrawItem(*TabBarGadget, \CurrentItem, 2)
+			EndIf
+			
+			If EventType() = #PB_EventType_LeftButtonUp
+				*TabBarGadget\MoveItem = #Null
+				*TabBarGadget\ReadyToMoveItem = #Null
+			ElseIf *TabBarGadget\MoveItem
+				If Not \Event
+					ChangeCurrentElement(\Item(), *TabBarGadget\MoveItem)
+					While NextElement(\Item())
+						If \MouseX > \Item()\X
+							SwapElements(\Item(), @\Item(), *TabBarGadget\MoveItem)
+							\Item()\X = *TabBarGadget\MoveItem\X
+							*TabBarGadget\MoveItem\X = \Item()\X + \Item()\Width
+							\Event = #TabBarGadget_Event_Swap
+						EndIf
+					Wend
+				EndIf
+				If Not \Event
+					ChangeCurrentElement(\Item(), *TabBarGadget\MoveItem)
+					While PreviousElement(\Item()) And ListIndex(\Item()) >= \Shift
+						If *TabBarGadget\MoveItem\Width < \Item()\Width
+							MinWidth = *TabBarGadget\MoveItem\Width
+						Else
+							MinWidth = \Item()\Width
+						EndIf
+						If \MouseX < \Item()\X + MinWidth
+							SwapElements(\Item(), @\Item(), *TabBarGadget\MoveItem)
+							*TabBarGadget\MoveItem\X = \Item()\X
+							\Item()\X = *TabBarGadget\MoveItem\X + *TabBarGadget\MoveItem\Width
+							\Event = #TabBarGadget_Event_Swap
+						EndIf
+					Wend
+				EndIf
+			EndIf
+			
+			StopDrawing()
+			
+		EndIf
+		
+		If \ToolTipTab <> \EventTab
+			GadgetToolTip(Gadget, \ToolTipText)
+			\ToolTipTab = \EventTab
+		EndIf
+		
+	EndWith
+	
+EndProcedure
+
+;}
+
+
+;-
+
+
+
+; Gibt das angegebene TabBarGadget wieder frei.
+; Release the specified TabBarGadget.
+Procedure FreeTabBarGadget(Gadget.i)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	ClearStructure(*TabBarGadget, TabBarGadget)
+	FreeMemory(*TabBarGadget)
+	FreeGadget(Gadget)
+	
+EndProcedure
+
+
+
+; Erstellt ein neus TabBarGadget.
+; Creates a new TabBarGadget.
+Procedure TabBarGadget(Gadget.i, X.i, Y.i, Width.i, Height.i, Flags.i=#Null)
+	
+	Protected *TabBarGadget.TabBarGadget = AllocateMemory(SizeOf(TabBarGadget))
+	Protected Result.i
+	
+	InitializeStructure(*TabBarGadget, TabBarGadget)
+	Result = CanvasGadget(Gadget, X, Y, Width, Height, #PB_Canvas_Keyboard)
+	If Gadget = #PB_Any
+		Gadget = Result
+	EndIf
+	SetGadgetData(Gadget, *TabBarGadget)
+	
+	With *TabBarGadget
+		\Flags  = Flags
+		\Number = Gadget
+	EndWith
+	
+	TabBarGadget_Update(Gadget)
+	
+	ProcedureReturn Result
+	
+EndProcedure
+
+
+
+; Gibt das aktuelle Ereignis auf der Registerkartenleiste zur�ck und aktualisiert das Gadget.
+; Returns the current event on the tab bar and updated the gadget.
+Procedure TabBarGadgetEvent(Gadget.i)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	*TabBarGadget\Event = #Null
+	TabBarGadget_Update(Gadget)
+	
+	ProcedureReturn *TabBarGadget\Event
+	
+EndProcedure
+
+
+
+; Gibt die Position der Registerkarte zur�ck, auf dem das aktuelle Ereigniss stattfand.
+;   #TabBarGadgetItem_EmptyButton wird bei der "Neu"-Registerkarte zur�ckgegeben.
+;   #TabBarGadgetItem_None wird zur�ck geben, wenn das Ereigniss im Leerraum war.
+; Returns the position of the tab, which took place on the current event.
+;   #TabBarGadgetItem_EmptyButton is returned in the "new"-tab.
+;   #TabBarGadgetItem_None will be returned if the event was in the empty space.
+Procedure EventTab(Gadget.i)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	ProcedureReturn *TabBarGadget\EventTab
+	
+EndProcedure
+
+
+
+; F�gt eine Registerkarte an die angegebenen Position ein.
+;   #TabBarGadgetItem_EmptyButton kann zum hinzuf�gen der "Neu"-Registerkarte verwendet werden.
+;   #PB_Default kann verwendet werden, wenn die Registerkarte am Ende eingef�gt werden soll.
+; Adds a tab at the specified position.
+;   #TabBarGadgetItem_EmptyButton can be used to add the "new"-tab.
+;   #PB_Default can be used if the tab should be inserted at the end.
+Procedure.i AddTabBarGadgetItem(Gadget.i, Position.i, Text.s, ImageID.i=#Null, DataValue.i=#Null)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	Protected *Item.TabBarGadgetItem
+	
+	If Position = #TabBarGadgetItem_EmptyButton
+		*TabBarGadget\Flags | #TabBarGadget_EmptyButton
+		*Item = @*TabBarGadget\EmptyItem
+	ElseIf TabBarGadget_ItemID(*TabBarGadget, Position)
+		*Item = InsertElement(*TabBarGadget\Item())
+	ElseIf Position = #PB_Default
+		LastElement(*TabBarGadget\Item())
+		*Item = AddElement(*TabBarGadget\Item())
+		Position = ListIndex(*TabBarGadget\Item())
+	EndIf
+	
+	With *Item
+		\Text      = Text
+		\ShortText = Text
+		\ImageID   = ImageID
+		\DataValue = DataValue
+	EndWith
+	
+	TabBarGadget_Update(Gadget)
+	
+	ProcedureReturn Position
+	
+EndProcedure
+
+
+
+; Entfernt die Registerkarte mit der angegebenen Position.
+;   #TabBarGadgetItem_EmptyButton kann zum entfernen der "Neu"-Registerkarte verwendet werden.
+; Removes the tab With the specified position.
+;   #TabBarGadgetItem_EmptyButton can be used to remove the "new"-tab.
+Procedure RemoveTabBarGadgetItem(Gadget.i, Position.i)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	If TabBarGadget_ItemID(*TabBarGadget, Position)
+		DeleteElement(*TabBarGadget\Item())
+		If NextElement(*TabBarGadget\Item())
+			*TabBarGadget\CurrentItem = @*TabBarGadget\Item()
+		Else
+			*TabBarGadget\CurrentItem = LastElement(*TabBarGadget\Item())
+		EndIf
+	ElseIf Position = #TabBarGadgetItem_EmptyButton
+		*TabBarGadget\Flags & ~#TabBarGadget_EmptyButton
+	EndIf
+	
+	TabBarGadget_Update(Gadget)
+	
+EndProcedure
+
+
+
+; Entfernt alle Registerkarten aus der Leiste.
+; Removes all tabs from the bar.
+Procedure.i ClearTabBarGadgetItems(Gadget.i)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	ClearList(*TabBarGadget\Item())
+	
+	TabBarGadget_Update(Gadget)
+	
+EndProcedure
+
+
+
+; Gibt die Anzahl der Registerkarten zur�ck.
+; Returns the number of tabs.
+Procedure.i CountTabBarGadgetItems(Gadget.i)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	ProcedureReturn ListSize(*TabBarGadget\Item())
+	
+EndProcedure
+
+
+
+;- Set & Get
+
+
+
+; �ndert den Status der Registerkartenleiste
+;   (die Position der aktuellen Registerkarte oder #TabBarGadgetItem_None f�r keine Auswahl).
+; Changes the state of the tab bar
+;   (the location of the current tab, or #TabBarGadgetItem_None for no selection).
+Procedure SetTabBarGadgetState(Gadget.i, State.i, Mode.i=#TabBarGadgetMode_Position)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	Select Mode
+		Case #TabBarGadgetMode_Data
+			Repeat 
+				ForEach *TabBarGadget\Item()
+					If *TabBarGadget\Item()\DataValue = State
+						*TabBarGadget\CurrentItem = @*TabBarGadget\Item()
+						*TabBarGadget\CheckTab = #True
+						Break 2
+					EndIf
+				Next
+				*TabBarGadget\CurrentItem = #Null
+			Until #True
+		Case #TabBarGadgetMode_Position
+			If TabBarGadget_ItemID(*TabBarGadget, State)
+				*TabBarGadget\CurrentItem = @*TabBarGadget\Item()
+				*TabBarGadget\CheckTab = #True
+			Else
+				*TabBarGadget\CurrentItem = #Null
+			EndIf
+	EndSelect
+	
+	TabBarGadget_Update(Gadget)
+	
+EndProcedure
+
+
+
+; Gibt den Status der Registerkartenleiste
+;   (die Position der aktuellen Registerkarte oder #TabBarGadgetItem_None, wenn keine ausgew�hlt wurde).
+; Returns the status of the tab bar
+;   (the location of the current tab or #TabBarGadgetItem_None when none is selected).
+Procedure GetTabBarGadgetState(Gadget.i, Mode.i=#TabBarGadgetMode_Position)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	Select Mode
+		Case #TabBarGadgetMode_Data
+			If *TabBarGadget\CurrentItem
+				ProcedureReturn *TabBarGadget\CurrentItem\DataValue
+			EndIf
+		Case #TabBarGadgetMode_Position
+			If *TabBarGadget\CurrentItem
+				ChangeCurrentElement(*TabBarGadget\Item(), *TabBarGadget\CurrentItem)
+				ProcedureReturn ListIndex(*TabBarGadget\Item())
+			Else
+				ProcedureReturn #TabBarGadgetItem_None
+			EndIf
+	EndSelect
+	
+EndProcedure
+
+
+
+; �ndert den Daten-Wert der angegebenen Registerkarte.
+; Changes the data value of the specified tab.
+Procedure SetTabBarGadgetItemData(Gadget.i, Position.i, DataValue.i)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	If TabBarGadget_ItemID(*TabBarGadget, Position)
+		*TabBarGadget\Item()\DataValue = DataValue
+	EndIf
+	
+EndProcedure
+
+
+
+; Gibt den Daten-Wert der angegebenen Registerkarte zur�ck.
+;   #TabBarGadgetItem_EmptyButton kann f�r die "Neu"-Registerkarte verwendet werden.
+; Returns the data value of the specified tab.
+;   #TabBarGadgetItem_EmptyButton can be used for the "new"-tab.
+Procedure GetTabBarGadgetItemData(Gadget.i, Position.i)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	If TabBarGadget_ItemID(*TabBarGadget, Position)
+		ProcedureReturn *TabBarGadget\Item()\DataValue
+	EndIf
+	
+EndProcedure
+
+
+
+; �ndert das Icon der angegebenen Registerkarte.
+;   #TabBarGadgetItem_EmptyButton kann f�r die "Neu"-Registerkarte verwendet werden.
+; Changes the icon of the specified tab.
+;   #TabBarGadgetItem_EmptyButton can be used for the "new"-tab.
+Procedure SetTabBarGadgetItemImage(Gadget.i, Position.i, ImageID.i)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	If Position = #TabBarGadgetItem_EmptyButton
+		*TabBarGadget\EmptyItem\ImageID = ImageID
+	ElseIf TabBarGadget_ItemID(*TabBarGadget, Position)
+		*TabBarGadget\Item()\ImageID = ImageID
+	EndIf
+	
+EndProcedure
+
+
+
+; �ndert den Text der angegebenen Registerkarte.
+;   #TabBarGadgetItem_EmptyButton kann f�r die "Neu"-Registerkarte verwendet werden.
+; Changes the text of the specified tab.
+;   #TabBarGadgetItem_EmptyButton can be used for the "new"-tab.
+Procedure SetTabBarGadgetItemText(Gadget.i, Position.i, Text.s)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	If Position = #TabBarGadgetItem_EmptyButton
+		*TabBarGadget\EmptyItem\Text = Text
+	ElseIf TabBarGadget_ItemID(*TabBarGadget, Position)
+		*TabBarGadget\Item()\Text = Text
+		*TabBarGadget\Item()\ShortText = Text
+	EndIf
+	
+	TabBarGadget_Update(Gadget)
+	
+EndProcedure
+
+
+
+; Gibt den Text der angegebenen Registerkarte zur�ck.
+;   #TabBarGadgetItem_EmptyButton kann f�r die "Neu"-Registerkarte verwendet werden.
+; Returns the text of the specified tab.
+;   #TabBarGadgetItem_EmptyButton can be used for the "new"-tab.
+Procedure.s GetTabBarGadgetItemText(Gadget.i, Position.i)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	If Position = #TabBarGadgetItem_EmptyButton
+		ProcedureReturn *TabBarGadget\EmptyItem\Text
+	ElseIf TabBarGadget_ItemID(*TabBarGadget, Position)
+		ProcedureReturn *TabBarGadget\Item()\Text
+	EndIf
+	
+EndProcedure
+
+
+
+; Wechselt zur der Registerkarte mit dem angegebenen Text
+; Switches To the tab With the specified text
+Procedure SetTabBarGadgetText(Gadget.i, Text.s)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	*TabBarGadget\CurrentItem = #Null
+	ForEach *TabBarGadget\Item()
+		If *TabBarGadget\Item()\Text = Text
+			*TabBarGadget\CurrentItem = @*TabBarGadget\Item()
+			Break
+		EndIf
+	Next
+	
+	TabBarGadget_Update(Gadget)
+	
+EndProcedure
+
+
+
+; Gibt den Text der aktuellen Registerkarte zur�ck.
+; Returns the text of the current tab.
+Procedure.s GetTabBarGadgetText(Gadget.i)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	If *TabBarGadget\CurrentItem
+		ProcedureReturn *TabBarGadget\CurrentItem\Text
+	EndIf
+	
+EndProcedure
+
+
+
+; �ndert den Wert eines Attributs des Gadgets.
+; Change the value of an attribute of the gadget.
+Procedure SetTabBarGadgetAttribute(Gadget.i, Attribute.i, Value.i)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	Select Attribute
+		Case #TabBarGadget_CloseButton
+			If Value
+				*TabBarGadget\Flags | #TabBarGadget_CloseButton
+			Else
+				*TabBarGadget\Flags & ~#TabBarGadget_CloseButton
+			EndIf
+		Case #TabBarGadget_EmptyButton
+			If Value
+				*TabBarGadget\Flags | #TabBarGadget_EmptyButton
+			Else
+				*TabBarGadget\Flags & ~#TabBarGadget_EmptyButton
+			EndIf
+	EndSelect
+	
+	TabBarGadget_Update(Gadget)
+	
+EndProcedure
+
+
+; Gibt den Wert eines Attributs des Gadgets zur�ck.
+; Returns the value of an attribute of the gadget.
+Procedure.i GetTabBarGadgetAttribute(Gadget.i, Attribute.i)
+	
+	Protected *TabBarGadget.TabBarGadget = GetGadgetData(Gadget)
+	
+	Select Attribute
+		Case #TabBarGadget_CloseButton
+			If *TabBarGadget\Flags & #TabBarGadget_CloseButton
+				ProcedureReturn #True
+			EndIf
+		Case #TabBarGadget_EmptyButton
+			If *TabBarGadget\Flags & #TabBarGadget_EmptyButton
+				ProcedureReturn #True
+			EndIf
+	EndSelect
+	
+EndProcedure
+
+
+
+; IDE Options = PureBasic 4.60 (Windows - x86)
+; CursorPosition = 10
+; Folding = fcO-BwAi
+; EnableXP
